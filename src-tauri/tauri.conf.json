@@ -1,0 +1,45 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui/tauri/dev/crates/tauri-config-schema/schema.json",
+  "productName": "PromptLens",
+  "version": "0.1.0",
+  "identifier": "com.promptlens.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "PromptLens",
+        "width": 800,
+        "height": 600,
+        "resizable": true,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "focus": false,
+        "backgroundColor": "#00000000",
+        "x": 0,
+        "y": 0
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png"
+    ]
+  }
+}
