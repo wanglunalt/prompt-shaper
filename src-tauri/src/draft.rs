@@ -114,7 +114,7 @@ fn read_draft(
     };
     let process = process_name(pid);
     let title = window_title(hwnd);
-    if process_file(&process).contains("alacritty") {
+    if is_terminal(&process) {
         *last_alacritty = hwnd.0 as isize;
         return alacritty_draft(hwnd, worker, frame);
     }
@@ -194,6 +194,11 @@ fn process_file(process_path: &str) -> String {
         .next()
         .unwrap_or("")
         .to_ascii_lowercase()
+}
+
+fn is_terminal(process_path: &str) -> bool {
+    let file = process_file(process_path);
+    file.contains("alacritty") || file.contains("windowsterminal")
 }
 
 fn is_follow_target(process_path: &str, title: &str) -> bool {
@@ -334,7 +339,7 @@ unsafe fn print_window_bottom(hwnd: HWND) -> Option<image::RgbaImage> {
         return None;
     }
     let dpi = GetDeviceCaps(Some(screen), LOGPIXELSX).max(96);
-    let band = (176 * dpi / 96).clamp(140, 320).min(height);
+    let band = (280 * dpi / 96).clamp(220, 460).min(height);
     let memory = CreateCompatibleDC(Some(screen));
     if memory.is_invalid() {
         let _ = ReleaseDC(None, screen);
@@ -408,16 +413,19 @@ fn hash_pixels(buf: &[u8]) -> u64 {
 
 fn input_above_status(ocr: &str) -> Option<String> {
     let lines: Vec<&str> = ocr.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
-    let anchor = lines.iter().rposition(|line| is_status_anchor(line))?;
+    let anchor = lines.iter().rposition(|line| is_composer_footer(line) || is_status_anchor(line))?;
     let mut index = anchor;
     while index > 0 {
         index -= 1;
         let line = lines[index];
-        if is_status_anchor(line) || is_chrome_line(line) || is_noise(line) {
+        if is_composer_footer(line) || is_status_anchor(line) || is_chrome_line(line) || is_noise(line) {
             continue;
         }
+        if is_waiting(line) {
+            return None;
+        }
         let body = strip_marker(line);
-        if body.is_empty() || is_placeholder(&body) || is_status_anchor(&body) || is_chrome_line(&body) {
+        if body.is_empty() || is_placeholder(&body) || is_status_anchor(&body) || is_chrome_line(&body) || is_waiting(&body) {
             continue;
         }
         if body.chars().count() > 800 {
@@ -428,9 +436,29 @@ fn input_above_status(ocr: &str) -> Option<String> {
     None
 }
 
+fn is_composer_footer(line: &str) -> bool {
+    let low = line.to_ascii_lowercase();
+    low.contains("enter:queue")
+        || low.contains("enter：queue")
+        || low.contains("shift+tab:mode")
+        || low.contains("shift+tab：mode")
+        || (low.contains("alt+enter") && low.contains("shift+tab"))
+}
+
+fn is_waiting(line: &str) -> bool {
+    let low = line.to_ascii_lowercase();
+    low.contains("waiting for response") || low.contains("waitingforresponse")
+}
+
 fn is_status_anchor(line: &str) -> bool {
     let low = line.trim().to_ascii_lowercase();
     if low.starts_with("grok") {
+        return true;
+    }
+    if low.contains("grok")
+        && low.chars().count() < 48
+        && (low.contains("high") || low.contains("approve") || low.contains("task"))
+    {
         return true;
     }
     let parts: Vec<&str> = low.split_whitespace().collect();
@@ -448,6 +476,9 @@ fn is_chrome_line(text: &str) -> bool {
     let low = text.to_ascii_lowercase();
     low.contains("ctrl+")
         || low.contains("shift+tab")
+        || low.contains("alt+enter")
+        || low.contains("enter:queue")
+        || low.contains("enter：queue")
         || low.contains("files edited")
         || low.contains("run everything")
 }
@@ -636,5 +667,23 @@ mod tests {
     fn reads_hi_instead_of_the_previous_reply() {
         let ocr = "需要再加\n一层发送。\n砩 hi\nGrok 4.7 256K High\nD:\\1\\AI提示词\n";
         assert_eq!(input_above_status(ocr).as_deref(), Some("hi"));
+    }
+
+    #[test]
+    fn reads_composer_above_enter_queue() {
+        let ocr = "页面信息堆在一起\n/ Waiting for response... 6.2s\n> 配置API方便管理\nEnter:queue | Alt+Enter:newline | Shift+Tab:mode\n";
+        assert_eq!(input_above_status(ocr).as_deref(), Some("配置API方便管理"));
+    }
+
+    #[test]
+    fn reads_composer_when_shortcuts_are_split() {
+        let ocr = "> 配置API方便管理\nEnter:queue\nAlt+Enter:newline\nShift+Tab:mode\n";
+        assert_eq!(input_above_status(ocr).as_deref(), Some("配置API方便管理"));
+    }
+
+    #[test]
+    fn ignores_the_reply_when_the_composer_is_empty() {
+        let ocr = "页面信息堆在一起\n/ Waiting for response... 6.2s\nEnter:queue | Alt+Enter:newline | Shift+Tab:mode\n";
+        assert_eq!(input_above_status(ocr), None);
     }
 }
